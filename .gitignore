@@ -36,6 +36,8 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+student_mental_health_burnout_1M.csv
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

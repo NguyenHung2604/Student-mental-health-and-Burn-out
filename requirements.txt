@@ -1,0 +1,20 @@
+# Xử lý dữ liệu và tính toán
+pandas
+numpy
+scikit-learn
+
+# Vẽ biểu đồ và phân tích (EDA)
+matplotlib
+seaborn
+
+# Xây dựng API (Backend)
+fastapi
+uvicorn[standard]
+
+# Chạy Jupyter Notebook trong VS Code
+notebook
+ipykernel
+# Model và train model
+optuna
+xgboost
+lightgbm
