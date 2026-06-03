@@ -2,7 +2,6 @@ from pathlib import Path
 import os
 from typing import Annotated
 
-
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -13,27 +12,16 @@ import pandas as pd
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
-
 MODEL_PATH = Path("models/burnout_model.joblib")
 
 app = FastAPI(title="Student Burnout Prediction")
 
-
 def load_artifact():
     if not MODEL_PATH.exists():
         raise RuntimeError(
-            "Model file not found. Run: python train_burnout_model.py"
+            f"Model file not found at {MODEL_PATH.absolute()}. Please check your folder structure."
         )
     return joblib.load(MODEL_PATH)
-
-
-def burnout_level(score: float) -> str:
-    if score < 3:
-        return "Low"
-    if score < 6:
-        return "Medium"
-    return "High"
-
 
 DEFAULT_VALUES = {
     "age": 22,
@@ -52,15 +40,72 @@ DEFAULT_VALUES = {
     "internet_usage": 5,
     "financial_stress": 4,
     "family_expectation": 5,
+    "dropout_risk": 1.0,
+    "mental_health_index": 7.0,
 }
-
 
 def selected(value: str, current: str) -> str:
     return "selected" if value == current else ""
 
+def number_field(
+    label: str,
+    name: str,
+    value: object,
+    *,
+    min_value: object | None = None,
+    max_value: object | None = None,
+    step: str = "0.1",
+) -> str:
+    min_attr = "" if min_value is None else f' min="{min_value}"'
+    max_attr = "" if max_value is None else f' max="{max_value}"'
+    return f"""
+      <label class="field">
+        <span>{label}</span>
+        <input name="{name}" type="number"{min_attr}{max_attr} step="{step}" value="{value}" required>
+      </label>
+    """
+
+def select_field(label: str, name: str, current: str, options: list[str]) -> str:
+    options_html = "\n".join(
+        f'<option {selected(option, current)}>{option}</option>' for option in options
+    )
+    return f"""
+      <label class="field">
+        <span>{label}</span>
+        <select name="{name}" required>
+          {options_html}
+        </select>
+      </label>
+    """
 
 def render_form(result: str = "", values: dict | None = None) -> str:
     form_values = DEFAULT_VALUES | (values or {})
+    core_fields = "\n".join(
+        [
+            number_field("Age (15-60)", "age", form_values["age"], min_value=15, max_value=60, step="1"),
+            select_field("Gender", "gender", form_values["gender"], ["Male", "Female", "Other"]),
+            number_field("Academic year (1-8)", "academic_year", form_values["academic_year"], min_value=1, max_value=8, step="1"),
+            number_field("Study hours/day (0-16)", "study_hours_per_day", form_values["study_hours_per_day"], min_value=0, max_value=16),
+            number_field("Exam pressure (0-10)", "exam_pressure", form_values["exam_pressure"], min_value=0, max_value=10),
+            number_field("Academic performance (0-100)", "academic_performance", form_values["academic_performance"], min_value=0, max_value=100),
+            number_field("Stress level (0-10)", "stress_level", form_values["stress_level"], min_value=0, max_value=10),
+            number_field("Anxiety score (0-10)", "anxiety_score", form_values["anxiety_score"], min_value=0, max_value=10),
+            number_field("Depression score (0-10)", "depression_score", form_values["depression_score"], min_value=0, max_value=10),
+            number_field("Sleep hours/day (0-14)", "sleep_hours", form_values["sleep_hours"], min_value=0, max_value=14),
+            number_field("Dropout risk (0-10)", "dropout_risk", form_values["dropout_risk"], min_value=0, max_value=10, step="0.1"),
+            number_field("Mental health index (0-10)", "mental_health_index", form_values["mental_health_index"], min_value=0, max_value=10),
+        ]
+    )
+    advanced_fields = "\n".join(
+        [
+            number_field("Physical activity (0-10)", "physical_activity", form_values["physical_activity"], min_value=0, max_value=10),
+            number_field("Social support (0-10)", "social_support", form_values["social_support"], min_value=0, max_value=10),
+            number_field("Screen time hour/day (0-20)", "screen_time", form_values["screen_time"], min_value=0, max_value=20),
+            number_field("Internet usage hours/day (0-20)", "internet_usage", form_values["internet_usage"], min_value=0, max_value=20),
+            number_field("Financial stress (0-10)", "financial_stress", form_values["financial_stress"], min_value=0, max_value=10),
+            number_field("Family expectation (0-10)", "family_expectation", form_values["family_expectation"], min_value=0, max_value=10),
+        ]
+    )
     return f"""
 <!doctype html>
 <html lang="en">
@@ -69,51 +114,104 @@ def render_form(result: str = "", values: dict | None = None) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Burnout Prediction</title>
   <style>
+    :root {{
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --line: #dce4ee;
+      --text: #172033;
+      --muted: #5c6b82;
+      --accent: #176b87;
+      --accent-soft: #e9f7fb;
+      --result: #eaf7f3;
+    }}
     body {{
       margin: 0;
-      font-family: Arial, sans-serif;
-      background: #f5f7fb;
-      color: #18202f;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #eef4fb 0%, var(--bg) 100%);
+      color: var(--text);
     }}
     main {{
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
-      padding: 32px 20px;
+      padding: 28px 18px 40px;
     }}
     h1 {{
-      margin: 0 0 20px;
-      font-size: 28px;
+      margin: 0 0 10px;
+      font-size: clamp(26px, 3vw, 36px);
+      letter-spacing: -0.02em;
+    }}
+    .subtitle {{
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 14px;
     }}
     form {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 16px;
-      background: #fff;
-      border: 1px solid #dfe5ef;
-      border-radius: 8px;
-      padding: 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(17, 31, 53, 0.06);
     }}
-    label {{
+    .section {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }}
+    .section-title {{
+      margin: 2px 0 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }}
+    details {{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: #fbfdff;
+    }}
+    summary {{
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--accent);
+      list-style: none;
+    }}
+    summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .details-grid {{
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }}
+    .field {{
       display: grid;
       gap: 6px;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 600;
     }}
+    .field span {{
+      color: var(--text);
+    }}
     input, select {{
-      height: 38px;
+      height: 40px;
       border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 0 10px;
+      border-radius: 10px;
+      padding: 0 12px;
       font-size: 14px;
+      background: #fff;
     }}
     button {{
       height: 42px;
       border: 0;
-      border-radius: 6px;
-      background: #176b87;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #0f5d75);
       color: #fff;
       font-weight: 700;
       cursor: pointer;
+      box-shadow: 0 8px 18px rgba(23, 107, 135, 0.22);
     }}
     .full {{
       grid-column: 1 / -1;
@@ -121,75 +219,41 @@ def render_form(result: str = "", values: dict | None = None) -> str:
     .result {{
       margin: 18px 0 0;
       padding: 16px;
-      background: #eaf7f3;
+      background: var(--result);
       border: 1px solid #a8d8c8;
-      border-radius: 8px;
+      border-radius: 12px;
       font-size: 17px;
       font-weight: 700;
     }}
     .note {{
       margin-top: 14px;
-      color: #596579;
+      color: var(--muted);
       font-size: 13px;
+    }}
+    @media (max-width: 720px) {{
+      main {{
+        padding: 18px 12px 30px;
+      }}
+      form {{
+        padding: 14px;
+      }}
     }}
   </style>
 </head>
 <body>
   <main>
     <h1>Student Burnout Prediction</h1>
+    <p class="subtitle">Fill the key fields first. Open advanced inputs only if you want to refine the prediction.</p>
     <form method="get" action="/predict">
-      <label>Age
-        <input name="age" type="number" min="15" max="60" value="{form_values["age"]}" required>
-      </label>
-      <label>Gender
-        <select name="gender" required>
-          <option {selected("Male", form_values["gender"])}>Male</option>
-          <option {selected("Female", form_values["gender"])}>Female</option>
-          <option {selected("Other", form_values["gender"])}>Other</option>
-        </select>
-      </label>
-      <label>Academic year
-        <input name="academic_year" type="number" min="1" max="8" value="{form_values["academic_year"]}" required>
-      </label>
-      <label>Study hours per day
-        <input name="study_hours_per_day" type="number" min="0" max="16" step="0.1" value="{form_values["study_hours_per_day"]}" required>
-      </label>
-      <label>Exam pressure (0-10)
-        <input name="exam_pressure" type="number" min="0" max="10" step="0.1" value="{form_values["exam_pressure"]}" required>
-      </label>
-      <label>Academic performance (0-100)
-        <input name="academic_performance" type="number" min="0" max="100" step="0.1" value="{form_values["academic_performance"]}" required>
-      </label>
-      <label>Stress level (0-10)
-        <input name="stress_level" type="number" min="0" max="10" step="0.1" value="{form_values["stress_level"]}" required>
-      </label>
-      <label>Anxiety score (0-10)
-        <input name="anxiety_score" type="number" min="0" max="10" step="0.1" value="{form_values["anxiety_score"]}" required>
-      </label>
-      <label>Depression score (0-10)
-        <input name="depression_score" type="number" min="0" max="10" step="0.1" value="{form_values["depression_score"]}" required>
-      </label>
-      <label>Sleep hours
-        <input name="sleep_hours" type="number" min="0" max="14" step="0.1" value="{form_values["sleep_hours"]}" required>
-      </label>
-      <label>Physical activity (hours/day)
-        <input name="physical_activity" type="number" min="0" max="10" step="0.1" value="{form_values["physical_activity"]}" required>
-      </label>
-      <label>Social support (0-10)
-        <input name="social_support" type="number" min="0" max="10" step="0.1" value="{form_values["social_support"]}" required>
-      </label>
-      <label>Screen time (hours/day)
-        <input name="screen_time" type="number" min="0" max="20" step="0.1" value="{form_values["screen_time"]}" required>
-      </label>
-      <label>Internet usage (hours/day)
-        <input name="internet_usage" type="number" min="0" max="20" step="0.1" value="{form_values["internet_usage"]}" required>
-      </label>
-      <label>Financial stress (0-10)
-        <input name="financial_stress" type="number" min="0" max="10" step="0.1" value="{form_values["financial_stress"]}" required>
-      </label>
-      <label>Family expectation (0-10)
-        <input name="family_expectation" type="number" min="0" max="10" step="0.1" value="{form_values["family_expectation"]}" required>
-      </label>
+      <div class="section">
+        {core_fields}
+      </div>
+      <details>
+        <summary>Advanced inputs</summary>
+        <div class="details-grid">
+          {advanced_fields}
+        </div>
+      </details>
       <button class="full" type="submit">Predict burnout</button>
     </form>
     {result}
@@ -199,11 +263,9 @@ def render_form(result: str = "", values: dict | None = None) -> str:
 </html>
 """
 
-
 @app.get("/", response_class=HTMLResponse)
 def home():
     return render_form()
-
 
 @app.get("/predict", response_class=HTMLResponse)
 def predict(
@@ -223,8 +285,12 @@ def predict(
     internet_usage: Annotated[float, Query()],
     financial_stress: Annotated[float, Query()],
     family_expectation: Annotated[float, Query()],
+    dropout_risk: Annotated[float, Query()],
+    mental_health_index: Annotated[float, Query()],
 ):
     artifact = load_artifact()
+    
+    # Gom chính xác 18 biến gốc khớp 100% với file train thuần túy của bạn
     values = {
         "age": age,
         "gender": gender,
@@ -242,14 +308,30 @@ def predict(
         "internet_usage": internet_usage,
         "financial_stress": financial_stress,
         "family_expectation": family_expectation,
+        "dropout_risk": dropout_risk,
+        "mental_health_index": mental_health_index,
     }
-    input_data = pd.DataFrame([values])
+    
+    feature_order = [
+        "age", "gender", "academic_year", "study_hours_per_day", "exam_pressure",
+        "academic_performance", "stress_level", "anxiety_score", "depression_score",
+        "sleep_hours", "physical_activity", "social_support", "screen_time",
+        "internet_usage", "financial_stress", "family_expectation", "dropout_risk",
+        "mental_health_index"
+    ]
+    
+    input_data = pd.DataFrame([values])[feature_order]
+    
+    pipeline = artifact["pipeline"]
+    label_map = artifact.get("label_mapping") or {}
+    pred = pipeline.predict(input_data)[0]
+    level = label_map.get(int(pred), str(pred))
+    
+    proba_str = ""
+    if hasattr(pipeline, "predict_proba"):
+        probs = pipeline.predict_proba(input_data)[0]
+        pairs = [f"{label_map.get(i, i)}: {p*100:.1f}%" for i, p in enumerate(probs)]
+        proba_str = " | Xác suất nhóm: " + ", ".join(pairs)
 
-    score = float(artifact["pipeline"].predict(input_data)[0])
-    score = max(0.0, min(10.0, score))
-    level = burnout_level(score)
-    result = (
-        f'<div class="result">Predicted burnout score: {score:.2f}/10 '
-        f'| Level: {level}</div>'
-    )
+    result = f'<div class="result">Dự đoán mức độ nguy cơ kiệt sức: {level}{proba_str}</div>'
     return render_form(result, values)
