@@ -37,6 +37,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 student_mental_health_burnout_1M.csv
+models/*.joblib
 
 # Unit test / coverage reports
 htmlcov/

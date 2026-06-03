@@ -3,8 +3,13 @@ main1.ipynb
 train_burnout_model.py
 scripts/
 __pycache__/
+api/__pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.ipynb
 README.md
+.git/
+.vercel/
+csv/
+models/*.joblib

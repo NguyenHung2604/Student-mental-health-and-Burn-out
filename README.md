@@ -34,10 +34,10 @@ Run the web form:
 uvicorn app:app --reload
 ```
 
-Open `http://127.0.0.1:8000`, fill in the student information, and submit the form to get a predicted `burnout_score` and level:
+Open `http://127.0.0.1:8000`, fill in the student information, and submit the form to get a predicted burnout level:
 
 - `Low`: score < 3
 - `Medium`: 3 <= score < 6
 - `High`: score >= 6
 
-The model uses `burnout_score` as the target. It does not use output-like columns such as `mental_health_index`, `risk_level`, or `dropout_risk` as input features.
+The model creates `burnout_level` from `burnout_score` as the target. `burnout_score`, `risk_level`, `mental_health_index`, and `dropout_risk` are not used as input features.

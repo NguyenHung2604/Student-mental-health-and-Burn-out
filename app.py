@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import math
 import os
 from typing import Annotated
 
@@ -7,21 +9,77 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
-import joblib
-import pandas as pd
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
-MODEL_PATH = Path("models/burnout_model.joblib")
+MODEL_PATH = Path(__file__).resolve().parent / "models" / "burnout_model_light.json"
 
 app = FastAPI(title="Student Burnout Prediction")
 
 def load_artifact():
     if not MODEL_PATH.exists():
         raise RuntimeError(
-            f"Model file not found at {MODEL_PATH.absolute()}. Please check your folder structure."
+            f"Model file not found at {MODEL_PATH}. Run scripts/export_lightweight_model.py first."
         )
-    return joblib.load(MODEL_PATH)
+    return json.loads(MODEL_PATH.read_text(encoding="utf-8"))
+
+
+ARTIFACT = load_artifact()
+
+LEGACY_DEFAULT_VALUES = {
+    "dropout_risk": 1.0,
+    "mental_health_index": 7.0,
+    "burnout_score": 2.0,
+}
+
+
+def build_features(values: dict) -> list[float]:
+    gender = values["gender"]
+    encoded_gender = [
+        1.0 if gender == category else 0.0
+        for category in ARTIFACT["gender_categories"]
+    ]
+    numeric_values = [
+        float(values.get(feature, LEGACY_DEFAULT_VALUES.get(feature, 0.0)))
+        for feature in ARTIFACT["numeric_features"]
+    ]
+    return encoded_gender + numeric_values
+
+
+def predict_tree(nodes: list[dict], features: list[float]) -> float:
+    index = 0
+    while True:
+        node = nodes[index]
+        if node["is_leaf"]:
+            return node["value"]
+
+        value = features[node["feature_idx"]]
+        if math.isnan(value):
+            go_left = node["missing_go_to_left"]
+        else:
+            go_left = value <= node["threshold"]
+        index = node["left"] if go_left else node["right"]
+
+
+def softmax(raw_scores: list[float]) -> list[float]:
+    max_score = max(raw_scores)
+    exp_scores = [math.exp(score - max_score) for score in raw_scores]
+    total = sum(exp_scores)
+    return [score / total for score in exp_scores]
+
+
+def predict_burnout(values: dict) -> tuple[int, str, list[float]]:
+    features = build_features(values)
+    raw_scores = list(ARTIFACT["baseline_prediction"])
+    for iteration in ARTIFACT["predictors"]:
+        for class_index, tree in enumerate(iteration):
+            raw_scores[class_index] += predict_tree(tree, features)
+
+    probabilities = softmax(raw_scores)
+    best_index = max(range(len(probabilities)), key=probabilities.__getitem__)
+    prediction = ARTIFACT["classes"][best_index]
+    label = ARTIFACT["label_mapping"].get(str(prediction), str(prediction))
+    return prediction, label, probabilities
 
 DEFAULT_VALUES = {
     "age": 22,
@@ -40,8 +98,6 @@ DEFAULT_VALUES = {
     "internet_usage": 5,
     "financial_stress": 4,
     "family_expectation": 5,
-    "dropout_risk": 1.0,
-    "mental_health_index": 7.0,
 }
 
 def selected(value: str, current: str) -> str:
@@ -92,8 +148,6 @@ def render_form(result: str = "", values: dict | None = None) -> str:
             number_field("Anxiety score (0-10)", "anxiety_score", form_values["anxiety_score"], min_value=0, max_value=10),
             number_field("Depression score (0-10)", "depression_score", form_values["depression_score"], min_value=0, max_value=10),
             number_field("Sleep hours/day (0-14)", "sleep_hours", form_values["sleep_hours"], min_value=0, max_value=14),
-            number_field("Dropout risk (0-10)", "dropout_risk", form_values["dropout_risk"], min_value=0, max_value=10, step="0.1"),
-            number_field("Mental health index (0-10)", "mental_health_index", form_values["mental_health_index"], min_value=0, max_value=10),
         ]
     )
     advanced_fields = "\n".join(
@@ -285,12 +339,10 @@ def predict(
     internet_usage: Annotated[float, Query()],
     financial_stress: Annotated[float, Query()],
     family_expectation: Annotated[float, Query()],
-    dropout_risk: Annotated[float, Query()],
-    mental_health_index: Annotated[float, Query()],
 ):
     artifact = load_artifact()
     
-    # Gom chính xác 18 biến gốc khớp 100% với file train thuần túy của bạn
+    # Keep request values aligned with the feature list stored in the exported model.
     values = {
         "age": age,
         "gender": gender,
@@ -308,30 +360,14 @@ def predict(
         "internet_usage": internet_usage,
         "financial_stress": financial_stress,
         "family_expectation": family_expectation,
-        "dropout_risk": dropout_risk,
-        "mental_health_index": mental_health_index,
     }
-    
-    feature_order = [
-        "age", "gender", "academic_year", "study_hours_per_day", "exam_pressure",
-        "academic_performance", "stress_level", "anxiety_score", "depression_score",
-        "sleep_hours", "physical_activity", "social_support", "screen_time",
-        "internet_usage", "financial_stress", "family_expectation", "dropout_risk",
-        "mental_health_index"
-    ]
-    
-    input_data = pd.DataFrame([values])[feature_order]
-    
-    pipeline = artifact["pipeline"]
-    label_map = artifact.get("label_mapping") or {}
-    pred = pipeline.predict(input_data)[0]
-    level = label_map.get(int(pred), str(pred))
-    
-    proba_str = ""
-    if hasattr(pipeline, "predict_proba"):
-        probs = pipeline.predict_proba(input_data)[0]
-        pairs = [f"{label_map.get(i, i)}: {p*100:.1f}%" for i, p in enumerate(probs)]
-        proba_str = " | Xác suất nhóm: " + ", ".join(pairs)
 
-    result = f'<div class="result">Dự đoán mức độ nguy cơ kiệt sức: {level}{proba_str}</div>'
+    _, level, probabilities = predict_burnout(values)
+    label_map = ARTIFACT["label_mapping"]
+    pairs = [
+        f"{label_map.get(str(class_id), class_id)}: {probability * 100:.1f}%"
+        for class_id, probability in zip(ARTIFACT["classes"], probabilities)
+    ]
+    proba_str = " | Probabilities: " + ", ".join(pairs)
+    result = f'<div class="result">Burnout level: {level}{proba_str}</div>'
     return render_form(result, values)
