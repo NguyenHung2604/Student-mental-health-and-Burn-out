@@ -41,3 +41,5 @@ Open `http://127.0.0.1:8000`, fill in the student information, and submit the fo
 - `High`: score >= 6
 
 The model creates `burnout_level` from `burnout_score` as the target. `burnout_score`, `risk_level`, `mental_health_index`, and `dropout_risk` are not used as input features.
+Link demo web:
+https://student-mental-health-and-burn-out.vercel.app/
